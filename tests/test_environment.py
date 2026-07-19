@@ -33,3 +33,28 @@ def test_features_are_normalized_and_include_action_terms():
     assert -1.0 <= features["elbow_angle"] <= 1.0
     assert math.isclose(features["action_shoulder"], 1.0)
     assert features["release"] == 0.0
+    assert "shoulder+:relative_target" in features
+    assert "shoulder+:tip_vx" in features
+
+
+def test_release_features_include_predicted_landing_error():
+    env = ThrowingArmEnvironment(target_distance=3.0)
+    state = env.reset()
+    features = env.normalized_features(state, (0.0, 0.0, True))
+
+    assert "release:predicted_landing_error" in features
+    assert "release:predicted_landing_closeness" in features
+    assert 0.0 <= features["release:predicted_landing_error"] <= 1.0
+    assert 0.0 <= features["release:predicted_landing_closeness"] <= 1.0
+
+
+def test_max_steps_forces_release_and_reports_landing():
+    env = ThrowingArmEnvironment(target_distance=3.0, max_steps=2)
+    env.reset()
+    env.step((0.0, 0.0, False))
+    result = env.step((0.0, 0.0, False))
+
+    assert result.done
+    assert result.state.holding_ball is False
+    assert result.info["landing_point"] is not None
+    assert result.info["landing_error"] is not None

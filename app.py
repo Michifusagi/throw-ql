@@ -8,7 +8,17 @@ import streamlit as st
 
 from agent import ApproximateQAgent
 from environment import EpisodeTrace, ThrowingArmEnvironment
-from training import EpisodeStats, MotionFrame, evaluate_greedy, make_env_and_agent, record_greedy_motion, train_agent
+from training import (
+    EpisodeStats,
+    MotionFrame,
+    evaluate_greedy,
+    make_env_and_agent,
+    pretrain_demo_policy,
+    record_demo_motion,
+    record_greedy_motion,
+    train_agent,
+    warm_start_agent,
+)
 
 
 WEIGHTS_PATH = Path("weights.json")
@@ -17,8 +27,8 @@ WEIGHTS_PATH = Path("weights.json")
 def ensure_state() -> None:
     if "env" not in st.session_state or "agent" not in st.session_state:
         env, agent = make_env_and_agent(
-            target_distance=5.0,
-            epsilon=0.2,
+            target_distance=3.0,
+            epsilon=0.35,
             learning_rate=0.15,
             discount=0.9,
             seed=0,
@@ -28,6 +38,8 @@ def ensure_state() -> None:
         st.session_state.history = []
         st.session_state.trace = env.episode_trace(0.0)
         st.session_state.motion_frames = []
+        st.session_state.motion_actions = []
+        st.session_state.motion_label = ""
         st.session_state.last_message = "Ready"
 
 
@@ -38,6 +50,8 @@ def reset_agent(target_distance: float, epsilon: float, learning_rate: float, di
     st.session_state.history = []
     st.session_state.trace = env.episode_trace(0.0)
     st.session_state.motion_frames = []
+    st.session_state.motion_actions = []
+    st.session_state.motion_label = ""
     st.session_state.last_message = "Reset complete"
 
 
@@ -129,38 +143,62 @@ def success_rate(history: list[EpisodeStats]) -> float:
     return sum(1 for item in window if item.success) / len(window)
 
 
-ensure_state()
-
 st.set_page_config(page_title="Throw Q-learning", layout="wide")
+ensure_state()
 st.title("Throw Q-learning")
 
 with st.sidebar:
-    epsilon = st.slider("epsilon", 0.0, 1.0, 0.2, 0.01)
+    epsilon = st.slider("epsilon", 0.0, 1.0, 0.35, 0.01)
     learning_rate = st.slider("learning rate", 0.0, 1.0, 0.15, 0.01)
     discount = st.slider("discount factor", 0.0, 0.99, 0.9, 0.01)
-    episodes = st.number_input("episode count", min_value=1, max_value=5000, value=200, step=50)
-    target_distance = st.slider("target distance", 1.0, 8.0, 5.0, 0.1)
+    episodes = st.number_input("episode count", min_value=1, max_value=5000, value=50, step=50)
+    target_distance = st.slider("target distance", 1.0, 8.0, 3.0, 0.1)
     random_seed = st.number_input("random seed", min_value=0, max_value=999999, value=0, step=1)
+    use_warm_start = st.checkbox("use warm start demo", value=True)
+    demo_episodes = st.number_input("demo episodes", min_value=1, max_value=500, value=30, step=5)
     motion_delay = st.slider("motion delay", 0.02, 0.5, 0.08, 0.01)
     show_trail = st.checkbox("show motion trail", value=True)
 
     sync_params(target_distance, epsilon, learning_rate, discount)
 
     if st.button("Start training", use_container_width=True):
+        warm_history = []
+        if use_warm_start and not st.session_state.history:
+            warm_history, trace = warm_start_agent(
+                st.session_state.env,
+                st.session_state.agent,
+                int(demo_episodes),
+            )
+            for index, item in enumerate(warm_history, start=1):
+                item.episode = index
+            st.session_state.history.extend(warm_history)
         history, trace = train_agent(st.session_state.env, st.session_state.agent, int(episodes))
         offset = len(st.session_state.history)
         for index, item in enumerate(history, start=1):
             item.episode = offset + index
         st.session_state.history.extend(history)
+        if use_warm_start:
+            pretrain_demo_policy(st.session_state.env, st.session_state.agent, passes=10, rate=0.02)
         st.session_state.trace = trace
-        st.session_state.last_message = f"Trained {episodes} episodes"
+        st.session_state.motion_actions = []
+        st.session_state.motion_label = ""
+        if warm_history:
+            st.session_state.last_message = f"Warm started {demo_episodes} demos, then trained {episodes} episodes"
+        else:
+            st.session_state.last_message = f"Trained {episodes} episodes"
 
     if st.button("Greedy evaluation", use_container_width=True):
         stats, trace = evaluate_greedy(st.session_state.env, st.session_state.agent, episodes=1)
         st.session_state.trace = trace
+        st.session_state.motion_actions = []
+        st.session_state.motion_label = ""
         st.session_state.last_message = f"Greedy reward {stats[-1].total_reward:.2f}"
 
-    draw_motion = st.button("Draw greedy motion", use_container_width=True)
+    with st.container(border=True):
+        st.markdown("Motion playback")
+        motion_cols = st.columns(2)
+        draw_demo_motion = motion_cols[0].button("Demo", use_container_width=True, type="secondary")
+        draw_motion = motion_cols[1].button("Greedy", use_container_width=True, type="primary")
 
     if st.button("Save weights", use_container_width=True):
         st.session_state.agent.save_weights(WEIGHTS_PATH)
@@ -185,9 +223,22 @@ if draw_motion:
     motion_to_render = record_greedy_motion(st.session_state.env, st.session_state.agent)
     st.session_state.trace = motion_to_render.trace
     st.session_state.motion_frames = motion_to_render.frames
+    st.session_state.motion_actions = motion_to_render.actions
+    st.session_state.motion_label = "Greedy motion sequence"
     st.session_state.last_message = f"Rendered greedy motion reward {motion_to_render.stats.total_reward:.2f}"
     if st.session_state.agent.weights != weights_before:
         st.error("Weights changed during motion rendering.")
+    trace = st.session_state.trace
+elif draw_demo_motion:
+    weights_before = dict(st.session_state.agent.weights)
+    motion_to_render = record_demo_motion(st.session_state.env, st.session_state.agent)
+    st.session_state.trace = motion_to_render.trace
+    st.session_state.motion_frames = motion_to_render.frames
+    st.session_state.motion_actions = motion_to_render.actions
+    st.session_state.motion_label = "Demo motion sequence"
+    st.session_state.last_message = f"Rendered demo motion reward {motion_to_render.stats.total_reward:.2f}"
+    if st.session_state.agent.weights != weights_before:
+        st.error("Weights changed during demo rendering.")
     trace = st.session_state.trace
 
 latest = history[-1] if history else None
@@ -217,6 +268,26 @@ with right:
     curve_fig = draw_learning_curve(history)
     st.pyplot(curve_fig)
     plt.close(curve_fig)
+    if st.session_state.motion_actions:
+        st.subheader(st.session_state.motion_label or "Motion sequence")
+        release_step = next(
+            (index + 1 for index, action in enumerate(st.session_state.motion_actions) if "release" in action),
+            None,
+        )
+        landing_x = trace.landing_point[0] if trace.landing_point is not None else None
+        st.write(
+            {
+                "release step": release_step,
+                "landing x": round(landing_x, 3) if landing_x is not None else None,
+                "landing error": round(trace.landing_error, 3) if trace.landing_error is not None else None,
+                "motion reward": round(trace.total_reward, 3),
+            }
+        )
+        st.dataframe(
+            [{"step": index + 1, "action": action} for index, action in enumerate(st.session_state.motion_actions)],
+            use_container_width=True,
+            hide_index=True,
+        )
     if st.session_state.agent.weights:
         st.dataframe(
             sorted(st.session_state.agent.weights.items()),
