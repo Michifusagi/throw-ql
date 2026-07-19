@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+import random
+from typing import Dict, List, Optional, Tuple
+
+
+Action = Tuple[float, float, bool]
+
+
+@dataclass(frozen=True)
+class ArmState:
+    shoulder_angle: float
+    elbow_angle: float
+    shoulder_velocity: float
+    elbow_velocity: float
+    holding_ball: bool
+    step_count: int
+
+
+@dataclass
+class StepResult:
+    state: ArmState
+    reward: float
+    done: bool
+    info: Dict[str, object]
+
+
+@dataclass
+class EpisodeTrace:
+    joint_positions: List[Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]]
+    ball_path: List[Tuple[float, float]]
+    landing_point: Optional[Tuple[float, float]]
+    landing_error: Optional[float]
+    total_reward: float
+    success: bool
+    released: bool
+
+
+class ThrowingArmEnvironment:
+    """Small 2D throwing arm environment with simple kinematics."""
+
+    shoulder_limits = (-math.radians(70), math.radians(100))
+    elbow_limits = (-math.radians(120), math.radians(120))
+
+    def __init__(
+        self,
+        target_distance: float = 5.0,
+        max_steps: int = 28,
+        dt: float = 0.08,
+        link_lengths: Tuple[float, float] = (1.2, 1.0),
+        gravity: float = 9.81,
+        success_radius: float = 0.25,
+        seed: Optional[int] = None,
+    ) -> None:
+        self.target_distance = float(target_distance)
+        self.max_steps = int(max_steps)
+        self.dt = float(dt)
+        self.link_lengths = link_lengths
+        self.gravity = float(gravity)
+        self.success_radius = float(success_radius)
+        self.rng = random.Random(seed)
+        self.actions: List[Action] = [
+            (-1.0, 0.0, False),
+            (1.0, 0.0, False),
+            (0.0, -1.0, False),
+            (0.0, 1.0, False),
+            (0.0, 0.0, False),
+            (0.0, 0.0, True),
+        ]
+        self.accel = math.radians(42)
+        self.damping = 0.9
+        self.max_velocity = math.radians(230)
+        self.reset()
+
+    def reset(self) -> ArmState:
+        self.state = ArmState(
+            shoulder_angle=math.radians(25),
+            elbow_angle=math.radians(35),
+            shoulder_velocity=0.0,
+            elbow_velocity=0.0,
+            holding_ball=True,
+            step_count=0,
+        )
+        self.done = False
+        self.last_landing_point: Optional[Tuple[float, float]] = None
+        self.last_ball_path: List[Tuple[float, float]] = [self.end_effector(self.state)]
+        self.trace_joints: List[
+            Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]
+        ] = [self.joint_positions(self.state)]
+        return self.state
+
+    def get_possible_actions(self, state: Optional[ArmState] = None) -> List[Action]:
+        state = state or self.state
+        if self.done or not state.holding_ball:
+            return []
+        return list(self.actions)
+
+    def step(self, action: Action) -> StepResult:
+        if self.done:
+            return StepResult(self.state, 0.0, True, self._info())
+        if action not in self.actions:
+            raise ValueError(f"Unknown action: {action}")
+
+        shoulder_input, elbow_input, release = action
+        old_tip = self.end_effector(self.state)
+
+        shoulder_velocity = self._clip(
+            (self.state.shoulder_velocity + shoulder_input * self.accel) * self.damping,
+            -self.max_velocity,
+            self.max_velocity,
+        )
+        elbow_velocity = self._clip(
+            (self.state.elbow_velocity + elbow_input * self.accel) * self.damping,
+            -self.max_velocity,
+            self.max_velocity,
+        )
+        shoulder_angle = self._clip(
+            self.state.shoulder_angle + shoulder_velocity * self.dt,
+            *self.shoulder_limits,
+        )
+        elbow_angle = self._clip(
+            self.state.elbow_angle + elbow_velocity * self.dt,
+            *self.elbow_limits,
+        )
+        next_state = ArmState(
+            shoulder_angle=shoulder_angle,
+            elbow_angle=elbow_angle,
+            shoulder_velocity=shoulder_velocity,
+            elbow_velocity=elbow_velocity,
+            holding_ball=not release,
+            step_count=self.state.step_count + 1,
+        )
+        self.state = next_state
+        new_tip = self.end_effector(next_state)
+        self.trace_joints.append(self.joint_positions(next_state))
+
+        control_penalty = -0.01 * (abs(shoulder_input) + abs(elbow_input))
+        reward = control_penalty - 0.002
+        info = self._info()
+
+        if release:
+            ball_velocity = ((new_tip[0] - old_tip[0]) / self.dt, (new_tip[1] - old_tip[1]) / self.dt)
+            landing, path = self.projectile_path(new_tip, ball_velocity)
+            error = abs(landing[0] - self.target_distance)
+            success = error <= self.success_radius
+            reward += 10.0 / (1.0 + error) + (10.0 if success else 0.0)
+            self.last_landing_point = landing
+            self.last_ball_path = path
+            self.done = True
+            info = self._info()
+        elif next_state.step_count >= self.max_steps:
+            reward -= 8.0
+            self.done = True
+            info = self._info()
+
+        return StepResult(next_state, reward, self.done, info)
+
+    def end_effector(self, state: Optional[ArmState] = None) -> Tuple[float, float]:
+        state = state or self.state
+        shoulder = state.shoulder_angle
+        elbow_total = state.shoulder_angle + state.elbow_angle
+        x = self.link_lengths[0] * math.cos(shoulder) + self.link_lengths[1] * math.cos(elbow_total)
+        y = self.link_lengths[0] * math.sin(shoulder) + self.link_lengths[1] * math.sin(elbow_total)
+        return x, max(0.0, y)
+
+    def joint_positions(
+        self, state: Optional[ArmState] = None
+    ) -> Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]:
+        state = state or self.state
+        base = (0.0, 0.0)
+        elbow = (
+            self.link_lengths[0] * math.cos(state.shoulder_angle),
+            self.link_lengths[0] * math.sin(state.shoulder_angle),
+        )
+        tip = self.end_effector(state)
+        return base, elbow, tip
+
+    def projectile_path(
+        self,
+        start: Tuple[float, float],
+        velocity: Tuple[float, float],
+        samples: int = 40,
+    ) -> Tuple[Tuple[float, float], List[Tuple[float, float]]]:
+        x0, y0 = start
+        vx, vy = velocity
+        disc = max(0.0, vy * vy + 2.0 * self.gravity * y0)
+        flight_time = max(0.0, (vy + math.sqrt(disc)) / self.gravity)
+        path = []
+        for i in range(samples + 1):
+            t = flight_time * i / samples if samples else flight_time
+            x = x0 + vx * t
+            y = max(0.0, y0 + vy * t - 0.5 * self.gravity * t * t)
+            path.append((x, y))
+        landing = (x0 + vx * flight_time, 0.0)
+        return landing, path
+
+    def normalized_features(self, state: ArmState, action: Action) -> Dict[str, float]:
+        tip = self.end_effector(state)
+        shoulder_mid = sum(self.shoulder_limits) / 2.0
+        elbow_mid = sum(self.elbow_limits) / 2.0
+        shoulder_span = (self.shoulder_limits[1] - self.shoulder_limits[0]) / 2.0
+        elbow_span = (self.elbow_limits[1] - self.elbow_limits[0]) / 2.0
+        action_shoulder, action_elbow, release = action
+        relative_target = (self.target_distance - tip[0]) / max(1.0, self.target_distance)
+        return {
+            "bias": 1.0,
+            "shoulder_angle": (state.shoulder_angle - shoulder_mid) / shoulder_span,
+            "elbow_angle": (state.elbow_angle - elbow_mid) / elbow_span,
+            "shoulder_velocity": state.shoulder_velocity / self.max_velocity,
+            "elbow_velocity": state.elbow_velocity / self.max_velocity,
+            "holding_ball": 1.0 if state.holding_ball else 0.0,
+            "relative_target": self._clip(relative_target, -2.0, 2.0) / 2.0,
+            "tip_height": self._clip(tip[1] / sum(self.link_lengths), 0.0, 1.0),
+            "action_shoulder": action_shoulder,
+            "action_elbow": action_elbow,
+            "release": 1.0 if release else 0.0,
+        }
+
+    def episode_trace(self, total_reward: float) -> EpisodeTrace:
+        landing_error = None
+        success = False
+        if self.last_landing_point is not None:
+            landing_error = abs(self.last_landing_point[0] - self.target_distance)
+            success = landing_error <= self.success_radius
+        return EpisodeTrace(
+            joint_positions=self.trace_joints,
+            ball_path=self.last_ball_path,
+            landing_point=self.last_landing_point,
+            landing_error=landing_error,
+            total_reward=total_reward,
+            success=success,
+            released=self.last_landing_point is not None,
+        )
+
+    def _info(self) -> Dict[str, object]:
+        error = None
+        if self.last_landing_point is not None:
+            error = abs(self.last_landing_point[0] - self.target_distance)
+        return {
+            "landing_point": self.last_landing_point,
+            "landing_error": error,
+            "ball_path": self.last_ball_path,
+            "joint_positions": self.trace_joints,
+            "target_distance": self.target_distance,
+        }
+
+    @staticmethod
+    def _clip(value: float, low: float, high: float) -> float:
+        return max(low, min(high, value))
