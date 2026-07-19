@@ -17,7 +17,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The sidebar controls epsilon, learning rate, discount factor, episode count, target distance, and random seed. You can train, reset, run a greedy evaluation, and save or load `weights.json`.
+The sidebar controls epsilon, learning rate, discount factor, episode count, target distance, random seed, and motion playback speed. You can train, reset, run a greedy evaluation, draw one greedy motion without learning, and save or load `weights.json`.
 
 ## Run Tests
 

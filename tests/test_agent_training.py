@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from training import evaluate_greedy, make_env_and_agent, train_agent
+from training import evaluate_greedy, make_env_and_agent, record_greedy_motion, train_agent
 
 
 def test_training_updates_weights():
@@ -33,6 +33,25 @@ def test_greedy_evaluation_does_not_change_weights():
     history, _ = evaluate_greedy(env, agent, episodes=2)
 
     assert len(history) == 2
+    assert agent.weights == before
+
+
+def test_record_greedy_motion_creates_frames_without_learning():
+    env, agent = make_env_and_agent(
+        target_distance=4.0,
+        epsilon=0.3,
+        learning_rate=0.2,
+        discount=0.9,
+        seed=9,
+    )
+    train_agent(env, agent, episodes=5)
+    before = dict(agent.weights)
+
+    motion = record_greedy_motion(env, agent)
+
+    assert motion.frames
+    assert motion.stats.released
+    assert motion.trace.landing_point is not None
     assert agent.weights == before
 
 
