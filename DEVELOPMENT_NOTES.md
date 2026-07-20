@@ -11,3 +11,4 @@ Short notes for tuning the throwing-arm Approximate Q-learning app. Add new entr
 - Changed `max_steps` timeout to force a release, producing landing/error feedback instead of ending with no landing point.
 - Added demo policy pretraining plus small manual priors to make the initial greedy policy closer to the scripted throw.
 - Moved the reset pose slightly backward (`shoulder=-20deg`, `elbow=70deg`) and retuned the demo so it starts closer to a throwing wind-up.
+- Changed the reset pose to a high wind-up (`shoulder=100deg`, `elbow=20deg`), narrowed angle limits to shoulder `-40..150deg` and elbow `-30..90deg`, and simplified the demo to negative acceleration/coast/release only.

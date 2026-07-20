@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from training import (
+    demo_throw_actions,
     evaluate_greedy,
     make_env_and_agent,
     pretrain_demo_policy,
@@ -9,6 +10,14 @@ from training import (
     train_agent,
     warm_start_agent,
 )
+
+
+def test_demo_actions_only_use_negative_acceleration_or_coast_before_release():
+    for shoulder_input, elbow_input, release in demo_throw_actions():
+        if release:
+            continue
+        assert shoulder_input <= 0.0
+        assert elbow_input <= 0.0
 
 
 def test_training_updates_weights():
@@ -130,7 +139,7 @@ def test_demo_anchor_after_exploration_keeps_greedy_throwing():
 
     warm_start_agent(env, agent, episodes=100)
     train_agent(env, agent, episodes=50)
-    pretrain_demo_policy(env, agent, passes=10, rate=0.02)
+    pretrain_demo_policy(env, agent, passes=20, rate=0.03)
     motion = record_greedy_motion(env, agent)
 
     assert motion.stats.released

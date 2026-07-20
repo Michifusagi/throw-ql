@@ -41,8 +41,8 @@ class EpisodeTrace:
 class ThrowingArmEnvironment:
     """Small 2D throwing arm environment with simple kinematics."""
 
-    shoulder_limits = (-math.radians(70), math.radians(100))
-    elbow_limits = (-math.radians(120), math.radians(120))
+    shoulder_limits = (-math.radians(40), math.radians(150))
+    elbow_limits = (-math.radians(30), math.radians(90))
 
     def __init__(
         self,
@@ -81,8 +81,8 @@ class ThrowingArmEnvironment:
 
     def reset(self) -> ArmState:
         self.state = ArmState(
-            shoulder_angle=math.radians(-20),
-            elbow_angle=math.radians(70),
+            shoulder_angle=math.radians(100),
+            elbow_angle=math.radians(20),
             shoulder_velocity=0.0,
             elbow_velocity=0.0,
             holding_ball=True,

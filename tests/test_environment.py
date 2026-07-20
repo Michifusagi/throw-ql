@@ -14,6 +14,16 @@ def test_release_ends_episode_and_reports_landing():
     assert result.state.holding_ball is False
 
 
+def test_reset_uses_high_windup_initial_pose_and_updated_limits():
+    env = ThrowingArmEnvironment(target_distance=3.0)
+    state = env.reset()
+
+    assert math.isclose(math.degrees(state.shoulder_angle), 100.0)
+    assert math.isclose(math.degrees(state.elbow_angle), 20.0)
+    assert tuple(round(math.degrees(value)) for value in env.shoulder_limits) == (-40, 150)
+    assert tuple(round(math.degrees(value)) for value in env.elbow_limits) == (-30, 90)
+
+
 def test_projectile_lands_farther_with_positive_horizontal_velocity():
     env = ThrowingArmEnvironment(target_distance=4.0)
     landing, path = env.projectile_path((1.0, 1.0), (2.0, 1.0))

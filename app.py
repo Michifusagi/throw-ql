@@ -178,7 +178,7 @@ with st.sidebar:
             item.episode = offset + index
         st.session_state.history.extend(history)
         if use_warm_start:
-            pretrain_demo_policy(st.session_state.env, st.session_state.agent, passes=10, rate=0.02)
+            pretrain_demo_policy(st.session_state.env, st.session_state.agent, passes=20, rate=0.03)
         st.session_state.trace = trace
         st.session_state.motion_actions = []
         st.session_state.motion_label = ""

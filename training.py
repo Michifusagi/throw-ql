@@ -99,18 +99,11 @@ def train_agent(
 
 def demo_throw_actions() -> List[tuple[float, float, bool]]:
     return [
-        (1.0, 0.0, False),
-        (0.0, 1.0, False),
-        (1.0, 1.0, False),
-        (-1.0, 1.0, False),
         (0.0, -1.0, False),
-        (1.0, -1.0, False),
         (-1.0, 0.0, False),
-        (1.0, -1.0, False),
         (0.0, 0.0, False),
-        (-1.0, -1.0, False),
-        (0.0, -1.0, False),
-        (0.0, -1.0, False),
+        (-1.0, 0.0, False),
+        (0.0, 0.0, False),
         (0.0, 0.0, True),
     ]
 
