@@ -128,23 +128,20 @@ def test_demo_policy_pretraining_makes_greedy_release():
     assert motion.trace.landing_error is not None
 
 
-def test_demo_anchor_after_exploration_keeps_greedy_throwing():
+def test_light_demo_hint_adds_target_aware_release_weights():
     env, agent = make_env_and_agent(
-        target_distance=3.0,
-        epsilon=0.35,
-        learning_rate=0.15,
-        discount=0.9,
+        target_distance=5.0,
+        epsilon=0.7,
+        learning_rate=0.05,
+        discount=0.98,
         seed=0,
     )
 
-    warm_start_agent(env, agent, episodes=100)
-    train_agent(env, agent, episodes=50)
-    pretrain_demo_policy(env, agent, passes=20, rate=0.03)
-    motion = record_greedy_motion(env, agent)
+    warm_start_agent(env, agent, episodes=10)
 
-    assert motion.stats.released
-    assert motion.trace.landing_error is not None
-    assert motion.trace.landing_error < 1.0
+    assert 0.0 < agent.weights["release:predicted_landing_closeness"] < 2.0
+    assert "release:target_x_tip_vx" in agent.weights
+    assert any(name.endswith(":target_distance") for name in agent.weights)
 
 
 def test_weight_save_and_load(tmp_path: Path):
@@ -163,3 +160,21 @@ def test_weight_save_and_load(tmp_path: Path):
     loaded.load_weights(path)
 
     assert loaded.weights == agent.weights
+
+
+def test_plan_training_hits_reachable_targets_within_success_radius():
+    for target_distance in (1.0, 2.0, 3.0, 4.0, 5.0):
+        env, agent = make_env_and_agent(
+            target_distance=target_distance,
+            epsilon=0.35,
+            learning_rate=0.12,
+            discount=0.9,
+            seed=0,
+        )
+
+        train_agent(env, agent, episodes=50)
+        motion = record_greedy_motion(env, agent)
+
+        assert motion.trace.landing_error is not None
+        assert motion.trace.landing_error <= env.success_radius
+        assert any(name.startswith("plan:") for name in agent.weights)

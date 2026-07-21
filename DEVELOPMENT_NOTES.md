@@ -12,3 +12,9 @@ Short notes for tuning the throwing-arm Approximate Q-learning app. Add new entr
 - Added demo policy pretraining plus small manual priors to make the initial greedy policy closer to the scripted throw.
 - Moved the reset pose slightly backward (`shoulder=-20deg`, `elbow=70deg`) and retuned the demo so it starts closer to a throwing wind-up.
 - Changed the reset pose to a high wind-up (`shoulder=100deg`, `elbow=20deg`), narrowed angle limits to shoulder `-40..150deg` and elbow `-30..90deg`, and simplified the demo to negative acceleration/coast/release only.
+- Replaced the discrete success bonus in release reward with a continuous closeness reward, while keeping `success_radius` for success-rate display.
+- Reframed the demo as a light form hint: weaker imitation priors, no post-training demo anchor, and extra target-conditioned features including signed landing delta.
+- Simplified motion by clamping joint velocities to non-positive values while still allowing positive acceleration as braking, and moved the reset pose to `shoulder=120deg`, `elbow=30deg`.
+- Added motion-primitive plan learning over pull/coast/brake/release candidates. This limits the reachable target range to 1-5m and makes 0.2m success stable within far fewer than 1000 episodes.
+- Added a Wall rally mode with separate wall physics, catch-count goals, SARSA-style approximate updates, and `track`/`track-high`/`track-low` catch primitives for repeated wall-reflection catches.
+- Made the wall move slowly between bounds and added wall position/velocity features. Single catches remain learnable, while repeated catch goals are now deliberately harder.
